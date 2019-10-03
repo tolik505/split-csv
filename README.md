@@ -1,7 +1,8 @@
-# split_csv
+<p align="center"><a href="https://godoc.org/github.com/tolik505/split-csv" target="_blank" rel="noopener noreferrer"><img width="150" src="https://repository-images.githubusercontent.com/212197147/d2207900-e626-11e9-827b-6faac4005ac1" alt="Vue logo"></a></p>
+
+# split_csv [![GoDoc](https://godoc.org/github.com/tolik505/split-csv?status.svg)](https://godoc.org/github.com/tolik505/split-csv)
 Fast and efficient Golang package for splitting large csv files on smaller chunks by size in bytes.
 
-API docs: https://godoc.org/github.com/tolik505/split-csv.
 
 ## Features:
 - Super fast splitting. Splitting of 700MB+ file on 4 chunks takes less than 1 sec!
