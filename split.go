@@ -1,3 +1,4 @@
+//Package split_csv implements splitting of csv files on chunks by size in bytes
 package split_csv
 
 import (
@@ -5,131 +6,168 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
-	"time"
 )
 
-type FileSplit struct {
-	FileChunkSize int
+//minFileChunkSize min file chunk size in bytes
+const minFileChunkSize = 100
+
+var (
+	ErrSmallFileChunkSize = errors.New("file chunk size is too small")
+	ErrBigFileChunkSize   = errors.New("file chunk size is bigger than input file")
+)
+
+//Splitter struct which contains options for splitting
+//FileChunkSize - a size of chunk in bytes, should be set by client
+//WithHeader - whether split csv with header (true by default)
+type Splitter struct {
+	FileChunkSize int //in bytes
 	WithHeader    bool
+	bufferSize    int //in bytes
 }
 
-func (s FileSplit) Split(filePath string, resultPath string) ([]string, error) {
-	file, err := os.Open(filePath)
+//New initializes Splitter struct
+func New() Splitter {
+	return Splitter{
+		WithHeader: true,
+		bufferSize: os.Getpagesize() * 128,
+	}
+}
+
+//Split splits file in smaller chunks
+func (s Splitter) Split(inputFilePath string, outputDirPath string) ([]string, error) {
+	if s.FileChunkSize < minFileChunkSize {
+		return nil, ErrSmallFileChunkSize
+	}
+	file, err := os.Open(inputFilePath)
 	if err != nil {
-		msg := fmt.Sprintf("Couldn't open file %s : %v", filePath, err)
+		msg := fmt.Sprintf("Couldn't open file %s : %v", inputFilePath, err)
 		return nil, errors.New(msg)
 	}
 	defer file.Close()
-	var result []string
 	stat, err := file.Stat()
 	if err != nil {
-		msg := fmt.Sprintf("Couldn't get file stat %s : %v", filePath, err)
+		msg := fmt.Sprintf("Couldn't get file stat %s : %v", inputFilePath, err)
 		return nil, errors.New(msg)
 	}
 	fileSize := stat.Size()
 	if fileSize <= int64(s.FileChunkSize) {
-		return []string{filePath}, nil
-	}
-	bufferSize := os.Getpagesize() * 128
-	if s.FileChunkSize < bufferSize {
-		bufferSize = s.FileChunkSize / 4
+		return nil, ErrBigFileChunkSize
 	}
 
-	var m runtime.MemStats
-	start := time.Now()
-	firstLine := true
-	chunk := 1
-	var header []byte
-	var brokenLine []byte
-	bufBulk := make([]byte, bufferSize)
-	bulkBuffer := bytes.NewBuffer(make([]byte, 0, bufferSize))
-	var chunkFilePath string
-	var chunkFile *os.File
-	fileName, ext := getFileName(filePath)
-	resPath := prepareResPath(resultPath)
+	bufBulk := make([]byte, s.bufferSize)
+	fileName, ext := getFileName(inputFilePath)
+	st := state{
+		s:             s,
+		inputFilePath: inputFilePath,
+		fileName:      fileName,
+		ext:           ext,
+		resultDirPath: prepareResultDirPath(outputDirPath),
+		inputFile:     file,
+		firstLine:     true,
+		chunk:         1,
+		bulkBuffer:    bytes.NewBuffer(make([]byte, 0, s.bufferSize)),
+	}
 	for {
 		//Read bulk from file
 		size, err := file.Read(bufBulk)
 		if err == io.EOF {
-			_, err = chunkFile.Write(brokenLine)
+			_, err = st.chunkFile.Write(st.brokenLine)
 			if err != nil {
-				msg := fmt.Sprintf("Couldn't write chunk file %s : %v", chunkFilePath, err)
+				msg := fmt.Sprintf("Couldn't write chunk file %s : %v", st.chunkFilePath, err)
 				return nil, errors.New(msg)
 			}
 			break
 		}
 		if err != nil {
-			msg := fmt.Sprintf("Couldn't read file bulk %s : %v", filePath, err)
+			msg := fmt.Sprintf("Couldn't read file bulk %s : %v", inputFilePath, err)
 			return nil, errors.New(msg)
 		}
-		buffer := bytes.NewBuffer(bufBulk[:size])
-		bulkBuffer.Reset()
-		if len(brokenLine) > 0 {
-			bulkBuffer.Write(brokenLine)
-			brokenLine = []byte{}
+		st.fileBuffer = bytes.NewBuffer(bufBulk[:size])
+		if len(st.brokenLine) > 0 {
+			st.bulkBuffer.Write(st.brokenLine)
+			st.brokenLine = []byte{}
 		}
-		for {
-			//Read line from bulk
-			bytesLine, err := buffer.ReadBytes('\n')
-			if err == io.EOF {
-				brokenLine = bytesLine
-				break
-			}
-			if err != nil {
-				msg := fmt.Sprintf("Couldn't read byte from file %s : %v", filePath, err)
-				return nil, errors.New(msg)
-			}
-			if firstLine && s.WithHeader {
-				firstLine = false
-				header = bytesLine
-				continue
-			}
-			bulkBuffer.Write(bytesLine)
-		}
-		//Save lines from bulk to a new file
-		chunkFilePath = resPath + fileName + "_" + strconv.Itoa(chunk) + "." + ext
-		stat, err := os.Stat(chunkFilePath)
-		if os.IsNotExist(err) {
-			chunkFile, err = os.Create(chunkFilePath)
-			if err != nil {
-				msg := fmt.Sprintf("Couldn't create file %s : %v", chunkFilePath, err)
-				return nil, errors.New(msg)
-			}
-			defer chunkFile.Close()
-			_, err = chunkFile.Write(header)
-			if err != nil {
-				msg := fmt.Sprintf("Couldn't write header of chunk file %s : %v", chunkFilePath, err)
-				return nil, errors.New(msg)
-			}
-			result = append(result, chunkFilePath)
-		}
-		_, err = chunkFile.Write(bulkBuffer.Bytes())
+
+		err = readLinesFromBulk(&st)
 		if err != nil {
-			msg := fmt.Sprintf("Couldn't write chunk file %s : %v", chunkFilePath, err)
-			return nil, errors.New(msg)
+			return nil, err
 		}
-		stat, _ = os.Stat(chunkFilePath)
-		if stat.Size() > int64(s.FileChunkSize-bufferSize) {
-			chunk++
+
+		err = saveBulkToFile(&st)
+		if err != nil {
+			return nil, err
+		}
+	}
+	st.chunkFile.Close()
+
+	return st.result, nil
+}
+
+//readLinesFromBulk reads bulk line by line
+func readLinesFromBulk(st *state) error {
+	for {
+		bytesLine, err := st.fileBuffer.ReadBytes('\n')
+		if err == io.EOF {
+			st.brokenLine = bytesLine
+			break
+		}
+		if err != nil {
+			msg := fmt.Sprintf("Couldn't read bytes from buffer of file %s : %v", st.inputFilePath, err)
+			return errors.New(msg)
+		}
+		if st.firstLine && st.s.WithHeader {
+			st.firstLine = false
+			st.header = bytesLine
+			continue
+		}
+		st.bulkBuffer.Write(bytesLine)
+		if st.s.FileChunkSize < st.s.bufferSize && st.bulkBuffer.Len() >= (st.s.FileChunkSize-len(st.header)) {
+			err = saveBulkToFile(st)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
-	elapsed := time.Since(start)
-	log.Printf("Splitting of %s took %s \n", file.Name(), elapsed)
-	runtime.ReadMemStats(&m)
-	log.Println("Alloc:", m.Alloc,
-		"TotalAlloc:", m.TotalAlloc,
-		"Sys:", m.Sys,
-		"HeapAlloc:", m.HeapAlloc)
-
-	return result, nil
+	return nil
 }
 
+// saveBulkToFile saves lines from bulk to a new file
+func saveBulkToFile(st *state) error {
+	st.chunkFilePath = st.resultDirPath + st.fileName + "_" + strconv.Itoa(st.chunk) + "." + st.ext
+	stat, err := os.Stat(st.chunkFilePath)
+	if os.IsNotExist(err) {
+		chunkFile, err := os.Create(st.chunkFilePath)
+		if err != nil {
+			msg := fmt.Sprintf("Couldn't create file %s : %v", st.chunkFilePath, err)
+			return errors.New(msg)
+		}
+		st.setChunkFile(chunkFile)
+		_, err = st.chunkFile.Write(st.header)
+		if err != nil {
+			msg := fmt.Sprintf("Couldn't write header of chunk file %s : %v", st.chunkFilePath, err)
+			return errors.New(msg)
+		}
+		st.result = append(st.result, st.chunkFilePath)
+	}
+	_, err = st.chunkFile.Write(st.bulkBuffer.Bytes())
+	if err != nil {
+		msg := fmt.Sprintf("Couldn't write chunk file %s : %v", st.chunkFilePath, err)
+		return errors.New(msg)
+	}
+	stat, _ = os.Stat(st.chunkFilePath)
+	if stat.Size() > int64(st.s.FileChunkSize-st.s.bufferSize) {
+		st.chunk++
+	}
+	st.bulkBuffer.Reset()
+
+	return nil
+}
+
+//getFileName extracts name and extension from path
 func getFileName(path string) (string, string) {
 	split := strings.Split(path, "/")
 	name := split[len(split)-1]
@@ -141,7 +179,11 @@ func getFileName(path string) (string, string) {
 	return name, ext
 }
 
-func prepareResPath(path string) string {
+//prepareResultDirPath adds '/' to the end of path if needed
+func prepareResultDirPath(path string) string {
+	if path == "" {
+		return ""
+	}
 	p := []byte(path)
 	if p[len(p)-1] != '/' {
 		p = append(p, '/')

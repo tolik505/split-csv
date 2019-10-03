@@ -6,13 +6,25 @@ import (
 	"testing"
 )
 
-var files = []string{
-	"./testdata/result/test_1.csv",
-	"./testdata/result/test_2.csv",
-	"./testdata/result/test_3.csv",
+var filesDefaultFlow = []string{
+	"testdata/result_default/test_1.csv",
+	"testdata/result_default/test_2.csv",
+	"testdata/result_default/test_3.csv",
+}
+var filesWithoutHeader = []string{
+	"testdata/result_without_header/test_1.csv",
+	"testdata/result_without_header/test_2.csv",
+	"testdata/result_without_header/test_3.csv",
+}
+var filesSmallBuffer = []string{
+	"testdata/result_small_buffer/test_1.csv",
+	"testdata/result_small_buffer/test_2.csv",
+	"testdata/result_small_buffer/test_3.csv",
 }
 
 func setUp(t *testing.T) {
+	files := append(filesDefaultFlow, filesWithoutHeader...)
+	files = append(files, filesSmallBuffer...)
 	for _, file := range files {
 		_, err := os.Stat(file)
 		if os.IsNotExist(err) {
@@ -27,10 +39,50 @@ func setUp(t *testing.T) {
 
 func Test_fs_split(t *testing.T) {
 	setUp(t)
-	input := "./testdata/test.csv"
-	fs := FileSplit{FileChunkSize: 1000}
-	result, _ := fs.Split(input, "./testdata/result")
-	for i, item := range files {
+	input := "testdata/test.csv"
+	t.Run("Default flow", func(t *testing.T) {
+		s := New()
+		s.FileChunkSize = 800
+		result, err := s.Split(input, "testdata/result_default")
+		assertResult(t, result, filesDefaultFlow)
+		assert.Nil(t, err)
+	})
+	t.Run("Without headers", func(t *testing.T) {
+		s := New()
+		s.FileChunkSize = 800
+		s.WithHeader = false
+		result, err := s.Split(input, "testdata/result_without_header")
+		assertResult(t, result, filesWithoutHeader)
+		assert.Nil(t, err)
+	})
+	t.Run("With small buffer", func(t *testing.T) {
+		s := New()
+		s.FileChunkSize = 800
+		s.bufferSize = 100
+		result, err := s.Split(input, "testdata/result_small_buffer/")
+		assertResult(t, result, filesSmallBuffer)
+		assert.Nil(t, err)
+	})
+	t.Run("Big file chunk", func(t *testing.T) {
+		s := New()
+		s.FileChunkSize = 1000000
+		result, err := s.Split(input, "")
+
+		assert.Nil(t, result)
+		assert.Equal(t, err, ErrBigFileChunkSize)
+	})
+	t.Run("Small file chunk error", func(t *testing.T) {
+		s := New()
+		result, err := s.Split(input, "")
+
+		assert.Nil(t, result)
+		assert.Equal(t, err, ErrSmallFileChunkSize)
+	})
+	setUp(t)
+}
+
+func assertResult(t *testing.T, result []string, expected []string) {
+	for i, item := range expected {
 		if i == 3 {
 			break
 		}
@@ -55,5 +107,5 @@ func Test_fs_split(t *testing.T) {
 		assert.Equal(t, statExp.Size(), statActual.Size())
 	}
 
-	assert.Equal(t, files, result)
+	assert.Equal(t, expected, result)
 }
