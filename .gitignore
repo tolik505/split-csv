@@ -1,4 +1,6 @@
 .idea
+.DS_Store
+testdata/.DS_Store
 testdata/big.csv
 testdata/result_default/test_1.csv
 testdata/result_default/test_2.csv
@@ -9,3 +11,6 @@ testdata/result_small_buffer/test_3.csv
 testdata/result_without_header/test_1.csv
 testdata/result_without_header/test_2.csv
 testdata/result_without_header/test_3.csv
+testdata/test_1.csv
+testdata/test_2.csv
+testdata/test_3.csv

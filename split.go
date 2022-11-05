@@ -169,7 +169,7 @@ func saveBulkToFile(st *state) error {
 
 //getFileName extracts name and extension from path
 func getFileName(path string) (string, string) {
-	split := strings.Split(path, "/")
+	split := strings.Split(path, string(os.PathSeparator))
 	name := split[len(split)-1]
 	split = strings.Split(name, ".")
 	ext := split[len(split)-1]
@@ -185,8 +185,8 @@ func prepareResultDirPath(path string) string {
 		return ""
 	}
 	p := []byte(path)
-	if p[len(p)-1] != '/' {
-		p = append(p, '/')
+	if p[len(p)-1] != os.PathSeparator {
+		p = append(p, os.PathSeparator)
 	}
 
 	return string(p)
