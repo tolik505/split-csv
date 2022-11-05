@@ -1,6 +1,12 @@
 <p align="center"><a href="https://godoc.org/github.com/tolik505/split-csv" target="_blank" rel="noopener noreferrer"><img width="250" src="https://repository-images.githubusercontent.com/212197147/d2207900-e626-11e9-827b-6faac4005ac1" alt="Vue logo"></a></p>
 
-# split_csv [![GoDoc](https://godoc.org/github.com/tolik505/split-csv?status.svg)](https://godoc.org/github.com/tolik505/split-csv)
+# Split csv
+[![GoDoc](https://godoc.org/github.com/tolik505/split-csv?status.svg)](https://godoc.org/github.com/tolik505/split-csv)
+[![Go Report Card](https://goreportcard.com/badge/github.com/tolik505/split-csv?style=flat-square)](https://goreportcard.com/report/github.com/tolik505/split-csv)
+[![codecov](https://codecov.io/gh/tolik505/split-csv/branch/master/graph/badge.svg?token=YRJJN6J5XN)](https://codecov.io/gh/tolik505/split-csv)
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Ftolik505%2Fsplit-csv.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Ftolik505%2Fsplit-csv?ref=badge_shield)
+[![License](http://img.shields.io/badge/license-mit-blue.svg?style=flat-square)](https://github.com/tolik505/split-csv/blob/master/LICENSE.MD)
+
 Fast and efficient Golang package for splitting large csv files on smaller chunks by size in bytes.
 
 
@@ -46,3 +52,6 @@ func ExampleSplitCsv() {
 	// Output: [testdata/test_1.csv testdata/test_2.csv testdata/test_3.csv]
 }
 ```
+
+## License
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Ftolik505%2Fsplit-csv.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Ftolik505%2Fsplit-csv?ref=badge_large)
