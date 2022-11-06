@@ -1,7 +1,13 @@
 package split_csv
 
 import (
+	"bytes"
+	"errors"
+	"fmt"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/tolik505/split-csv/mocks"
+	"io"
 	"os"
 	"testing"
 )
@@ -21,10 +27,47 @@ var filesSmallBuffer = []string{
 	"testdata/result_small_buffer/test_2.csv",
 	"testdata/result_small_buffer/test_3.csv",
 }
+var filesForExampleTest = []string{
+	"testdata/test_1.csv",
+	"testdata/test_2.csv",
+	"testdata/test_3.csv",
+}
+
+type stateFactoryMock struct{}
+
+func (f *stateFactoryMock) Init(
+	s Splitter,
+	inputFilePath string,
+	fileName string,
+	ext string,
+	resultDirPath string,
+	inputFile io.ReadCloser,
+) *state {
+	chunkFileMock := &mocks.WriteCloser{}
+	chunkFileMock.EXPECT().Write([]byte("brokenLine")).Return(0, errors.New("write error"))
+	bulkBufferMock := &mocks.Buffer{}
+	bulkBufferMock.EXPECT().Write([]byte("brokenLine")).Return(0, errors.New("buffer write error"))
+
+	return &state{
+		s:             s,
+		inputFilePath: inputFilePath,
+		fileName:      fileName,
+		ext:           ext,
+		resultDirPath: resultDirPath,
+		inputFile:     inputFile,
+		firstLine:     true,
+		chunk:         1,
+		bulkBuffer:    bulkBufferMock,
+		brokenLine:    []byte("brokenLine"),
+		chunkFile:     chunkFileMock,
+		chunkFilePath: "/chunkFile",
+	}
+}
 
 func setUp(t *testing.T) {
 	files := append(filesDefaultFlow, filesWithoutHeader...)
 	files = append(files, filesSmallBuffer...)
+	files = append(files, filesForExampleTest...)
 	for _, file := range files {
 		_, err := os.Stat(file)
 		if os.IsNotExist(err) {
@@ -37,7 +80,7 @@ func setUp(t *testing.T) {
 	}
 }
 
-func Test_fs_split(t *testing.T) {
+func Test_Split_integration(t *testing.T) {
 	setUp(t)
 	input := "testdata/test.csv"
 	t.Run("Default flow", func(t *testing.T) {
@@ -78,6 +121,97 @@ func Test_fs_split(t *testing.T) {
 		assert.Nil(t, result)
 		assert.Equal(t, err, ErrSmallFileChunkSize)
 	})
+	t.Run("saveBulkToFile error", func(t *testing.T) {
+		s := New()
+		s.FileChunkSize = 2000
+		s.bufferSize = 1000
+		result, err := s.Split(input, "wrong")
+
+		assert.Nil(t, result)
+		assert.EqualError(t, err, "Couldn't create file wrong/test_1.csv : open wrong/test_1.csv: no such file or directory")
+	})
+	t.Run("readLinesFromBulk error", func(t *testing.T) {
+		s := New()
+		s.FileChunkSize = 100
+		result, err := s.Split(input, "wrong")
+
+		assert.Nil(t, result)
+		assert.EqualError(t, err, "Couldn't create file wrong/test_1.csv : open wrong/test_1.csv: no such file or directory")
+	})
+	t.Run("File Stat error", func(t *testing.T) {
+		fileOpMock := mocks.NewFileOperator(t)
+		fileOpMock.EXPECT().Stat(input).Return(nil, errors.New("error"))
+		s := New()
+		s.FileChunkSize = 100
+		s.fileOp = fileOpMock
+		result, err := s.Split(input, "")
+
+		assert.Nil(t, result)
+		assert.EqualError(t, err, "Couldn't get file stat testdata/test.csv : error")
+	})
+	t.Run("File Open error", func(t *testing.T) {
+		fileOpMock := mocks.NewFileOperator(t)
+		stat, _ := os.Stat(input)
+		fileOpMock.EXPECT().Stat(input).Return(stat, nil)
+		fileOpMock.EXPECT().Open(input).Return(nil, errors.New("error"))
+		s := New()
+		s.FileChunkSize = 100
+		s.fileOp = fileOpMock
+		result, err := s.Split(input, "")
+
+		assert.Nil(t, result)
+		assert.EqualError(t, err, "Couldn't open file testdata/test.csv : error")
+	})
+	t.Run("File Read error", func(t *testing.T) {
+		fileOpMock := mocks.NewFileOperator(t)
+		stat, _ := os.Stat(input)
+		fileOpMock.EXPECT().Stat(input).Return(stat, nil)
+		fileMock := mocks.NewReadCloser(t)
+		fileOpMock.EXPECT().Open(input).Return(fileMock, nil)
+		fileMock.EXPECT().Read(mock.Anything).Return(0, errors.New("error"))
+		fileMock.EXPECT().Close().Return(nil)
+		s := New()
+		s.FileChunkSize = 100
+		s.fileOp = fileOpMock
+		result, err := s.Split(input, "")
+
+		assert.Nil(t, result)
+		assert.EqualError(t, err, "Couldn't read file bulk testdata/test.csv : error")
+	})
+	t.Run("Write chunk file error", func(t *testing.T) {
+		fileOpMock := mocks.NewFileOperator(t)
+		stat, _ := os.Stat(input)
+		fileOpMock.EXPECT().Stat(input).Return(stat, nil)
+		fileMock := mocks.NewReadCloser(t)
+		fileOpMock.EXPECT().Open(input).Return(fileMock, nil)
+		fileMock.EXPECT().Read(mock.Anything).Return(0, io.EOF)
+		fileMock.EXPECT().Close().Return(nil)
+		s := New()
+		s.FileChunkSize = 100
+		s.fileOp = fileOpMock
+		s.stateFactory = &stateFactoryMock{}
+		result, err := s.Split(input, "")
+
+		assert.Nil(t, result)
+		assert.EqualError(t, err, "Couldn't write chunk file /chunkFile : write error")
+	})
+	t.Run("Bulk buffer write error", func(t *testing.T) {
+		fileOpMock := mocks.NewFileOperator(t)
+		stat, _ := os.Stat(input)
+		fileOpMock.EXPECT().Stat(input).Return(stat, nil)
+		fileMock := mocks.NewReadCloser(t)
+		fileOpMock.EXPECT().Open(input).Return(fileMock, nil)
+		fileMock.EXPECT().Read(mock.Anything).Return(0, nil)
+		fileMock.EXPECT().Close().Return(nil)
+		s := New()
+		s.FileChunkSize = 100
+		s.fileOp = fileOpMock
+		s.stateFactory = &stateFactoryMock{}
+		result, err := s.Split(input, "")
+
+		assert.Nil(t, result)
+		assert.EqualError(t, err, "Couldn't write broken line to the bulk buffer: buffer write error")
+	})
 	setUp(t)
 }
 
@@ -108,4 +242,259 @@ func assertResult(t *testing.T, result []string, expected []string) {
 	}
 
 	assert.Equal(t, expected, result)
+}
+
+func Test_prepareResultDirPath(t *testing.T) {
+	type args struct {
+		path string
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "It adds backslash in the end of the path",
+			args: args{path: "testdata/result"},
+			want: "testdata/result/",
+		},
+		{
+			name: "It doesn't add the second backslash in the end of the path",
+			args: args{path: "testdata/result/"},
+			want: "testdata/result/",
+		},
+		{
+			name: "It returns an empty string when the path is empty",
+			args: args{path: ""},
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equalf(t, tt.want, prepareResultDirPath(tt.args.path), "prepareResultDirPath(%v)", tt.args.path)
+		})
+	}
+}
+
+func Test_getFileName(t *testing.T) {
+	type args struct {
+		path string
+	}
+	tests := []struct {
+		name  string
+		args  args
+		want  string
+		want1 string
+	}{
+		{
+			name: "It returns the file name and extension for the path with folders",
+			args: args{
+				path: "path/to/file.txt",
+			},
+			want:  "file",
+			want1: "txt",
+		},
+		{
+			name: "It returns the file name and extension for the path without folders",
+			args: args{
+				path: "file.txt",
+			},
+			want:  "file",
+			want1: "txt",
+		},
+		{
+			name: "It returns the file name and empty extension for the path without extension",
+			args: args{
+				path: "file",
+			},
+			want:  "file",
+			want1: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, got1 := getFileName(tt.args.path)
+			assert.Equalf(t, tt.want, got, "getFileName(%v)", tt.args.path)
+			assert.Equalf(t, tt.want1, got1, "getFileName(%v)", tt.args.path)
+		})
+	}
+}
+
+func TestSplitter_saveBulkToFile(t *testing.T) {
+	type args struct {
+		st     *state
+		fileOp func(t *testing.T) fileOperator
+	}
+	tests := []struct {
+		name    string
+		args    args
+		wantErr assert.ErrorAssertionFunc
+	}{
+		{
+			name: "It fails to create a file chunk",
+			args: args{
+				st: &state{},
+				fileOp: func(t *testing.T) fileOperator {
+					foMock := mocks.NewFileOperator(t)
+					foMock.EXPECT().Stat("_0.").Return(nil, errors.New("isNotExist"))
+					foMock.EXPECT().IsNotExist(errors.New("isNotExist")).Return(true)
+					foMock.EXPECT().Create("_0.").Return(nil, errors.New("error"))
+
+					return foMock
+				},
+			},
+			wantErr: func(t assert.TestingT, err error, _ ...interface{}) bool {
+				return assert.EqualError(t, err, "Couldn't create file _0. : error")
+			},
+		},
+		{
+			name: "It fails to write the header into file chunk",
+			args: args{
+				st: &state{
+					header: []byte{123},
+				},
+				fileOp: func(t *testing.T) fileOperator {
+					foMock := mocks.NewFileOperator(t)
+					foMock.EXPECT().Stat("_0.").Return(nil, errors.New("isNotExist"))
+					foMock.EXPECT().IsNotExist(errors.New("isNotExist")).Return(true)
+					chunkFile := mocks.NewWriteCloser(t)
+					foMock.EXPECT().Create("_0.").Return(chunkFile, nil)
+					chunkFile.EXPECT().Write([]byte{123}).Return(0, errors.New("error"))
+
+					return foMock
+				},
+			},
+			wantErr: func(t assert.TestingT, err error, _ ...interface{}) bool {
+				return assert.EqualError(t, err, "Couldn't write header of chunk file _0. : error")
+			},
+		},
+		{
+			name: "It fails to write the buffer into file chunk",
+			args: args{
+				st: &state{
+					bulkBuffer: bytes.NewBuffer([]byte{234}),
+				},
+				fileOp: func(t *testing.T) fileOperator {
+					foMock := mocks.NewFileOperator(t)
+					foMock.EXPECT().Stat("_0.").Return(nil, errors.New("isNotExist"))
+					foMock.EXPECT().IsNotExist(errors.New("isNotExist")).Return(true)
+					chunkFile := mocks.NewWriteCloser(t)
+					foMock.EXPECT().Create("_0.").Return(chunkFile, nil)
+					chunkFile.EXPECT().Write([]byte(nil)).Return(0, nil)
+					chunkFile.EXPECT().Write([]byte{234}).Return(0, errors.New("error"))
+
+					return foMock
+				},
+			},
+			wantErr: func(t assert.TestingT, err error, _ ...interface{}) bool {
+				return assert.EqualError(t, err, "Couldn't write chunk file _0. : error")
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := Splitter{
+				fileOp: tt.args.fileOp(t),
+			}
+			tt.wantErr(t, s.saveBulkToFile(tt.args.st), fmt.Sprintf("saveBulkToFile(%v)", tt.args.st))
+		})
+	}
+}
+
+func TestSplitter_readLinesFromBulk(t *testing.T) {
+	type args struct {
+		fileOp     func(t *testing.T) fileOperator
+		fileBuffer func(t *testing.T) buffer
+		bulkBuffer func(t *testing.T) buffer
+	}
+	defaultFileOp := func(t *testing.T) fileOperator { return fileOp{} }
+	defaultBulkBuffer := func(t *testing.T) buffer { return bytes.NewBuffer([]byte{0}) }
+	tests := []struct {
+		name    string
+		args    args
+		wantErr assert.ErrorAssertionFunc
+	}{
+		{
+			name: "It fails to read from buffer",
+			args: args{
+				fileBuffer: func(t *testing.T) buffer {
+					fbMock := mocks.NewBuffer(t)
+					fbMock.EXPECT().ReadBytes(uint8('\n')).Return(nil, errors.New("error"))
+
+					return fbMock
+				},
+				fileOp:     defaultFileOp,
+				bulkBuffer: defaultBulkBuffer,
+			},
+			wantErr: func(t assert.TestingT, err error, _ ...interface{}) bool {
+				return assert.EqualError(t, err, "Couldn't read bytes from buffer of file test.txt : error")
+			},
+		},
+		{
+			name: "It fails to write to the bulk buffer",
+			args: args{
+				fileBuffer: func(t *testing.T) buffer {
+					fbMock := mocks.NewBuffer(t)
+					fbMock.EXPECT().ReadBytes(uint8('\n')).Return([]byte("base line"), nil)
+
+					return fbMock
+				},
+				fileOp: defaultFileOp,
+				bulkBuffer: func(t *testing.T) buffer {
+					fbMock := mocks.NewBuffer(t)
+					fbMock.EXPECT().Write([]byte("base line")).Return(0, errors.New("error"))
+
+					return fbMock
+				},
+			},
+			wantErr: func(t assert.TestingT, err error, _ ...interface{}) bool {
+				return assert.EqualError(t, err, "Couldn't write to the bulk buffer: error")
+			},
+		},
+		{
+			name: "It fails on saveBulkToFile error",
+			args: args{
+				fileBuffer: func(t *testing.T) buffer {
+					fbMock := mocks.NewBuffer(t)
+					fbMock.EXPECT().ReadBytes(uint8('\n')).Return([]byte("base line"), nil)
+
+					return fbMock
+				},
+				bulkBuffer: func(t *testing.T) buffer {
+					fbMock := mocks.NewBuffer(t)
+					fbMock.EXPECT().Write([]byte("base line")).Return(0, nil)
+					fbMock.EXPECT().Len().Return(10)
+
+					return fbMock
+				},
+				fileOp: func(t *testing.T) fileOperator {
+					foMock := mocks.NewFileOperator(t)
+					foMock.EXPECT().Stat("_0.").Return(nil, errors.New("isNotExist"))
+					foMock.EXPECT().IsNotExist(errors.New("isNotExist")).Return(true)
+					foMock.EXPECT().Create("_0.").Return(nil, errors.New("error"))
+
+					return foMock
+				},
+			},
+			wantErr: func(t assert.TestingT, err error, _ ...interface{}) bool {
+				return assert.EqualError(t, err, "Couldn't create file _0. : error")
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := Splitter{
+				fileOp:        tt.args.fileOp(t),
+				FileChunkSize: 1,
+				bufferSize:    10,
+			}
+			st := &state{
+				s:             s,
+				inputFilePath: "test.txt",
+				fileBuffer:    tt.args.fileBuffer(t),
+				bulkBuffer:    tt.args.bulkBuffer(t),
+			}
+			tt.wantErr(t, s.readLinesFromBulk(st), fmt.Sprintf("readLinesFromBulk(%v)", st))
+		})
+	}
 }
