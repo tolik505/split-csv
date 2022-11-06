@@ -1,8 +1,7 @@
 package split_csv
 
 import (
-	"bytes"
-	"os"
+	"io"
 )
 
 type state struct {
@@ -11,19 +10,19 @@ type state struct {
 	fileName      string
 	ext           string
 	resultDirPath string
-	inputFile     *os.File
-	chunkFile     *os.File
+	inputFile     io.ReadCloser
+	chunkFile     io.WriteCloser
 	chunkFilePath string
 	header        []byte
 	firstLine     bool
 	brokenLine    []byte
 	chunk         int
-	bulkBuffer    *bytes.Buffer
-	fileBuffer    *bytes.Buffer
+	bulkBuffer    buffer
+	fileBuffer    buffer
 	result        []string
 }
 
-func (s *state) setChunkFile(file *os.File) {
+func (s *state) setChunkFile(file io.WriteCloser) {
 	if s.chunkFile != nil {
 		s.chunkFile.Close()
 	}
