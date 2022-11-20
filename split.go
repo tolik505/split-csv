@@ -16,6 +16,7 @@ import (
 const minFileChunkSize = 100
 
 var (
+	ErrWrongSeparator     = errors.New("only one-character separators are supported")
 	ErrSmallFileChunkSize = errors.New("file chunk size is too small")
 	ErrBigFileChunkSize   = errors.New("file chunk size is bigger than input file")
 )
@@ -26,6 +27,7 @@ var (
 type Splitter struct {
 	FileChunkSize int //in bytes
 	WithHeader    bool
+	Separator     string
 	bufferSize    int //in bytes
 	fileOp        fileOperator
 	stateFactory  stateInitializer
@@ -35,6 +37,7 @@ type Splitter struct {
 func New() Splitter {
 	return Splitter{
 		WithHeader:   true,
+		Separator:    ",",
 		bufferSize:   os.Getpagesize() * 128,
 		fileOp:       fileOp{},
 		stateFactory: stateFactory{},
@@ -43,6 +46,10 @@ func New() Splitter {
 
 // Split splits file in smaller chunks
 func (s Splitter) Split(inputFilePath string, outputDirPath string) ([]string, error) {
+	_, err := strconv.Unquote(`'` + s.Separator + `'`)
+	if err != nil {
+		return nil, ErrWrongSeparator
+	}
 	if s.FileChunkSize < minFileChunkSize {
 		return nil, ErrSmallFileChunkSize
 	}
@@ -74,6 +81,7 @@ func (s Splitter) Split(inputFilePath string, outputDirPath string) ([]string, e
 		prepareResultDirPath(outputDirPath),
 		file,
 	)
+	isFirstBulk := true
 	for {
 		//Read bulk from file
 		size, err := file.Read(bufBulk)
@@ -96,6 +104,11 @@ func (s Splitter) Split(inputFilePath string, outputDirPath string) ([]string, e
 				return nil, errors.New(msg)
 			}
 			st.brokenLine = []byte{}
+		}
+
+		if isFirstBulk {
+			st.columnsCount = countColumns(bufBulk, []byte(s.Separator)[0])
+			isFirstBulk = false
 		}
 
 		err = s.readLinesFromBulk(st)
@@ -135,6 +148,11 @@ func (s Splitter) readLinesFromBulk(st *state) error {
 			return errors.New(msg)
 		}
 		if st.s.FileChunkSize < st.s.bufferSize && st.bulkBuffer.Len() >= (st.s.FileChunkSize-len(st.header)) {
+			separator := []byte(s.Separator)[0]
+			lineColumnsCount := countColumns(bytesLine, separator)
+			if lineColumnsCount != st.columnsCount || isIncompleteLine(bytesLine, separator) {
+				continue
+			}
 			err = s.saveBulkToFile(st)
 			if err != nil {
 				return err
@@ -143,6 +161,87 @@ func (s Splitter) readLinesFromBulk(st *state) error {
 	}
 
 	return nil
+}
+
+func isIncompleteLine(line []byte, separator byte) bool {
+	openingQuote := false
+	previousSeparator := false
+	previousQuote := false
+	quotesCount := 0
+
+	for i := 0; i < len(line); i++ {
+		if openingQuote && line[i] != '"' && previousQuote && quotesCount%2 == 0 {
+			openingQuote = false
+		}
+		switch line[i] {
+		case '"':
+			quotesCount++
+			if previousSeparator || i == 0 {
+				openingQuote = true
+			} else if !openingQuote {
+				quotesCount--
+			}
+			previousQuote = true
+		case separator:
+			if !openingQuote {
+				previousSeparator = true
+			}
+		case '\n':
+			if openingQuote {
+				return true
+			}
+		case ' ':
+			break
+		default:
+			previousSeparator = false
+		}
+		if line[i] != '"' {
+			previousQuote = false
+		}
+	}
+
+	return false
+}
+
+func countColumns(content []byte, separator byte) int {
+	result := 1
+	openingQuote := false
+	previousSeparator := false
+	previousQuote := false
+	quotesCount := 0
+loop:
+	for i := 0; i < len(content); i++ {
+		if openingQuote && content[i] != '"' && previousQuote && quotesCount%2 == 0 {
+			openingQuote = false
+		}
+		switch content[i] {
+		case '"':
+			quotesCount++
+			if previousSeparator || i == 0 {
+				openingQuote = true
+			}
+			previousQuote = true
+		case separator:
+			if !openingQuote {
+				previousSeparator = true
+				result++
+			}
+		case '\n':
+			previousQuote = false
+			if !openingQuote {
+				break loop
+			}
+		case ' ':
+			break
+		default:
+			previousSeparator = false
+		}
+		if content[i] != '"' {
+			previousQuote = false
+		}
+	}
+
+	return result
 }
 
 // saveBulkToFile saves lines from bulk to a new file

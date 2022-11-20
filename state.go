@@ -19,6 +19,7 @@ type state struct {
 	chunk         int
 	bulkBuffer    buffer
 	fileBuffer    buffer
+	columnsCount  int
 	result        []string
 }
 
