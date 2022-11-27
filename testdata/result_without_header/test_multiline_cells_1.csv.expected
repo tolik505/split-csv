@@ -1,4 +1,6 @@
-Test header 1; Test header 2; Test header 3; Test header 4; Test header 5
+Test header 1; Test header 2; "Multiline
+header; with 3
+lines"; Test header 4; Test header 5
 1; test value; test value; test value; test value
 2; test value; test value; test value; test value
 3; test value; test value; test value; test value
@@ -12,4 +14,7 @@ Test header 1; Test header 2; Test header 3; Test header 4; Test header 5
 11; test value; test value; test value; test value
 12; test value; test value; test value; test value
 13; test value; test value; test value; test value
-14; test value; test value; test value; test value
+""; test ""value""; """"; """test;abc
+multiline;multiline;
+value"; "test 3423423 :|"" dfadf dfadf, dafad;bnc
+va;lue"

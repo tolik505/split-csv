@@ -7,6 +7,7 @@ import (
 
 func ExampleSplitCsv() {
 	splitter := splitCsv.New()
+	splitter.Separator = ";"     // "," is by default
 	splitter.FileChunkSize = 800 //in bytes
 	result, _ := splitter.Split("testdata/test.csv", "testdata/")
 	fmt.Println(result)

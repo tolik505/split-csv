@@ -17,15 +17,30 @@ var filesDefaultFlow = []string{
 	"testdata/result_default/test_2.csv",
 	"testdata/result_default/test_3.csv",
 }
+var filesDefaultFlowMultiline = []string{
+	"testdata/result_default/test_multiline_cells_1.csv",
+	"testdata/result_default/test_multiline_cells_2.csv",
+	"testdata/result_default/test_multiline_cells_3.csv",
+}
 var filesWithoutHeader = []string{
 	"testdata/result_without_header/test_1.csv",
 	"testdata/result_without_header/test_2.csv",
 	"testdata/result_without_header/test_3.csv",
 }
+var filesWithoutHeaderMultiline = []string{
+	"testdata/result_without_header/test_multiline_cells_1.csv",
+	"testdata/result_without_header/test_multiline_cells_2.csv",
+	"testdata/result_without_header/test_multiline_cells_3.csv",
+}
 var filesSmallBuffer = []string{
 	"testdata/result_small_buffer/test_1.csv",
 	"testdata/result_small_buffer/test_2.csv",
 	"testdata/result_small_buffer/test_3.csv",
+}
+var filesSmallBufferMultiline = []string{
+	"testdata/result_small_buffer/test_multiline_cells_1.csv",
+	"testdata/result_small_buffer/test_multiline_cells_2.csv",
+	"testdata/result_small_buffer/test_multiline_cells_3.csv",
 }
 var filesForExampleTest = []string{
 	"testdata/test_1.csv",
@@ -55,7 +70,7 @@ func (f *stateFactoryMock) Init(
 		ext:           ext,
 		resultDirPath: resultDirPath,
 		inputFile:     inputFile,
-		firstLine:     true,
+		isFirstLine:   true,
 		chunk:         1,
 		bulkBuffer:    bulkBufferMock,
 		brokenLine:    []byte("brokenLine"),
@@ -65,8 +80,11 @@ func (f *stateFactoryMock) Init(
 }
 
 func setUp(t *testing.T) {
-	files := append(filesDefaultFlow, filesWithoutHeader...)
+	files := append(filesDefaultFlow, filesDefaultFlowMultiline...)
+	files = append(files, filesWithoutHeader...)
+	files = append(files, filesWithoutHeaderMultiline...)
 	files = append(files, filesSmallBuffer...)
+	files = append(files, filesSmallBufferMultiline...)
 	files = append(files, filesForExampleTest...)
 	for _, file := range files {
 		_, err := os.Stat(file)
@@ -83,46 +101,88 @@ func setUp(t *testing.T) {
 func Test_Split_integration(t *testing.T) {
 	setUp(t)
 	input := "testdata/test.csv"
+	inputMultiline := "testdata/test_multiline_cells.csv"
 	t.Run("Default flow", func(t *testing.T) {
 		s := New()
+		s.Separator = ";"
 		s.FileChunkSize = 800
 		result, err := s.Split(input, "testdata/result_default")
 		assertResult(t, result, filesDefaultFlow)
 		assert.Nil(t, err)
 	})
+	t.Run("Default flow (multiline cells)", func(t *testing.T) {
+		s := New()
+		s.Separator = ";"
+		s.FileChunkSize = 800
+		result, err := s.Split(inputMultiline, "testdata/result_default")
+		assertResult(t, result, filesDefaultFlowMultiline)
+		assert.Nil(t, err)
+	})
 	t.Run("Without headers", func(t *testing.T) {
 		s := New()
+		s.Separator = ";"
 		s.FileChunkSize = 800
 		s.WithHeader = false
 		result, err := s.Split(input, "testdata/result_without_header")
 		assertResult(t, result, filesWithoutHeader)
 		assert.Nil(t, err)
 	})
+	t.Run("Without headers (multiline cells)", func(t *testing.T) {
+		s := New()
+		s.Separator = ";"
+		s.FileChunkSize = 800
+		s.WithHeader = false
+		result, err := s.Split(inputMultiline, "testdata/result_without_header")
+		assertResult(t, result, filesWithoutHeaderMultiline)
+		assert.Nil(t, err)
+	})
 	t.Run("With small buffer", func(t *testing.T) {
 		s := New()
+		s.Separator = ";"
 		s.FileChunkSize = 800
 		s.bufferSize = 100
 		result, err := s.Split(input, "testdata/result_small_buffer/")
 		assertResult(t, result, filesSmallBuffer)
 		assert.Nil(t, err)
 	})
-	t.Run("Big file chunk", func(t *testing.T) {
+	t.Run("With small buffer (multiline cells)", func(t *testing.T) {
 		s := New()
+		s.Separator = ";"
+		s.FileChunkSize = 800
+		s.bufferSize = 90
+		result, err := s.Split(inputMultiline, "testdata/result_small_buffer/")
+		assertResult(t, result, filesSmallBufferMultiline)
+		assert.Nil(t, err)
+	})
+	t.Run("Wrong separator", func(t *testing.T) {
+		s := New()
+		s.Separator = "Ω"
+		s.FileChunkSize = 800
+		result, err := s.Split(input, "")
+
+		assert.Nil(t, result)
+		assert.Equal(t, err, errors.New("only one-byte separators are supported"))
+	})
+	t.Run("Big file chunk error", func(t *testing.T) {
+		s := New()
+		s.Separator = ";"
 		s.FileChunkSize = 1000000
 		result, err := s.Split(input, "")
 
 		assert.Nil(t, result)
-		assert.Equal(t, err, ErrBigFileChunkSize)
+		assert.Equal(t, err, errors.New("file chunk size is bigger than input file"))
 	})
 	t.Run("Small file chunk error", func(t *testing.T) {
 		s := New()
+		s.Separator = ";"
 		result, err := s.Split(input, "")
 
 		assert.Nil(t, result)
-		assert.Equal(t, err, ErrSmallFileChunkSize)
+		assert.Equal(t, err, errors.New("file chunk size is too small"))
 	})
 	t.Run("saveBulkToFile error", func(t *testing.T) {
 		s := New()
+		s.Separator = ";"
 		s.FileChunkSize = 2000
 		s.bufferSize = 1000
 		result, err := s.Split(input, "wrong")
@@ -132,6 +192,7 @@ func Test_Split_integration(t *testing.T) {
 	})
 	t.Run("readLinesFromBulk error", func(t *testing.T) {
 		s := New()
+		s.Separator = ";"
 		s.FileChunkSize = 100
 		result, err := s.Split(input, "wrong")
 
@@ -142,6 +203,7 @@ func Test_Split_integration(t *testing.T) {
 		fileOpMock := mocks.NewFileOperator(t)
 		fileOpMock.EXPECT().Stat(input).Return(nil, errors.New("error"))
 		s := New()
+		s.Separator = ";"
 		s.FileChunkSize = 100
 		s.fileOp = fileOpMock
 		result, err := s.Split(input, "")
@@ -155,6 +217,7 @@ func Test_Split_integration(t *testing.T) {
 		fileOpMock.EXPECT().Stat(input).Return(stat, nil)
 		fileOpMock.EXPECT().Open(input).Return(nil, errors.New("error"))
 		s := New()
+		s.Separator = ";"
 		s.FileChunkSize = 100
 		s.fileOp = fileOpMock
 		result, err := s.Split(input, "")
@@ -171,6 +234,7 @@ func Test_Split_integration(t *testing.T) {
 		fileMock.EXPECT().Read(mock.Anything).Return(0, errors.New("error"))
 		fileMock.EXPECT().Close().Return(nil)
 		s := New()
+		s.Separator = ";"
 		s.FileChunkSize = 100
 		s.fileOp = fileOpMock
 		result, err := s.Split(input, "")
@@ -187,6 +251,7 @@ func Test_Split_integration(t *testing.T) {
 		fileMock.EXPECT().Read(mock.Anything).Return(0, io.EOF)
 		fileMock.EXPECT().Close().Return(nil)
 		s := New()
+		s.Separator = ";"
 		s.FileChunkSize = 100
 		s.fileOp = fileOpMock
 		s.stateFactory = &stateFactoryMock{}
@@ -195,23 +260,7 @@ func Test_Split_integration(t *testing.T) {
 		assert.Nil(t, result)
 		assert.EqualError(t, err, "Couldn't write chunk file /chunkFile : write error")
 	})
-	t.Run("Bulk buffer write error", func(t *testing.T) {
-		fileOpMock := mocks.NewFileOperator(t)
-		stat, _ := os.Stat(input)
-		fileOpMock.EXPECT().Stat(input).Return(stat, nil)
-		fileMock := mocks.NewReadCloser(t)
-		fileOpMock.EXPECT().Open(input).Return(fileMock, nil)
-		fileMock.EXPECT().Read(mock.Anything).Return(0, nil)
-		fileMock.EXPECT().Close().Return(nil)
-		s := New()
-		s.FileChunkSize = 100
-		s.fileOp = fileOpMock
-		s.stateFactory = &stateFactoryMock{}
-		result, err := s.Split(input, "")
 
-		assert.Nil(t, result)
-		assert.EqualError(t, err, "Couldn't write broken line to the bulk buffer: buffer write error")
-	})
 	setUp(t)
 }
 
@@ -456,13 +505,13 @@ func TestSplitter_readLinesFromBulk(t *testing.T) {
 			args: args{
 				fileBuffer: func(t *testing.T) buffer {
 					fbMock := mocks.NewBuffer(t)
-					fbMock.EXPECT().ReadBytes(uint8('\n')).Return([]byte("base line"), nil)
+					fbMock.EXPECT().ReadBytes(uint8('\n')).Return([]byte("base; line"), nil)
 
 					return fbMock
 				},
 				bulkBuffer: func(t *testing.T) buffer {
 					fbMock := mocks.NewBuffer(t)
-					fbMock.EXPECT().Write([]byte("base line")).Return(0, nil)
+					fbMock.EXPECT().Write([]byte("base; line")).Return(0, nil)
 					fbMock.EXPECT().Len().Return(10)
 
 					return fbMock
@@ -487,14 +536,135 @@ func TestSplitter_readLinesFromBulk(t *testing.T) {
 				fileOp:        tt.args.fileOp(t),
 				FileChunkSize: 1,
 				bufferSize:    10,
+				Separator:     ";",
 			}
 			st := &state{
 				s:             s,
 				inputFilePath: "test.txt",
 				fileBuffer:    tt.args.fileBuffer(t),
 				bulkBuffer:    tt.args.bulkBuffer(t),
+				columnsCount:  2,
 			}
-			tt.wantErr(t, s.readLinesFromBulk(st), fmt.Sprintf("readLinesFromBulk(%v)", st))
+			_, err := s.readLinesFromBulk(st)
+			tt.wantErr(t, err, fmt.Sprintf("readLinesFromBulk(%v)", st))
+		})
+	}
+}
+
+func Test_countCompletedColumns(t *testing.T) {
+	type args struct {
+		bulkBytes []byte
+		separator byte
+	}
+	tests := []struct {
+		name string
+		args args
+		want int
+	}{
+		{
+			name: "Simple rows",
+			args: args{
+				bulkBytes: []byte(`Test header 1; Test header 2; Test header 3; Test header 4; Test header 5
+1; test value; test value; test value; test value`),
+				separator: ';',
+			},
+			want: 5,
+		},
+		{
+			name: "Complex rows",
+			args: args{
+				bulkBytes: []byte(`""; test ""value""; """"; """test;abc
+multiline;multiline;
+value"; "test
+value"
+16; test value; test value; test value; test value`),
+				separator: ';',
+			},
+			want: 5,
+		},
+		{
+			name: "Complete line",
+			args: args{
+				bulkBytes: []byte(`1; test value; test value; test value; "test; value"
+`),
+				separator: ';',
+			},
+			want: 5,
+		},
+		{
+			name: "Incomplete line",
+			args: args{
+				bulkBytes: []byte(`1; test value; "test; value"; test value; "test value
+`),
+				separator: ';',
+			},
+			want: 4,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equalf(t, tt.want, countCompletedColumns(tt.args.bulkBytes, tt.args.separator), "countCompletedColumns(%v, %v)", tt.args.bulkBytes, tt.args.separator)
+		})
+	}
+}
+
+func Test_isCompletingLine(t *testing.T) {
+	type args struct {
+		line      []byte
+		separator byte
+	}
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{
+			name: "Incomplete line 1",
+			args: args{
+				line: []byte(`value"; "test
+`),
+				separator: ';',
+			},
+			want: false,
+		},
+		{
+			name: "Incomplete line 2",
+			args: args{
+				line: []byte(`""; test ""value""; """"; """test;abc
+`),
+				separator: ';',
+			},
+			want: false,
+		},
+		{
+			name: "In not completing line",
+			args: args{
+				line:      []byte(`14; test value; test value; test value`),
+				separator: ';',
+			},
+			want: false,
+		},
+		{
+			name: "Completing line 1",
+			args: args{
+				line: []byte(`va;lue"
+`),
+				separator: ';',
+			},
+			want: true,
+		},
+		{
+			name: "Completing line 2",
+			args: args{
+				line:      []byte(`lines"; "Test; header 4"; Test header 5`),
+				separator: ';',
+			},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equalf(t, tt.want, isCompletingLine(tt.args.line, tt.args.separator), "isCompletingLine(%v, %v)", tt.args.line, tt.args.separator)
 		})
 	}
 }

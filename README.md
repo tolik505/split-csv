@@ -11,8 +11,9 @@ Fast and efficient Golang package for splitting large csv files on smaller chunk
 
 
 ## Features:
-- Super fast splitting. Splitting of 700MB+ file on 4 chunks takes less than 1 sec!
-- Allocates minimum memory.
+- Super-fast splitting. Splitting of 700MB+ file takes less than 1 sec!
+- Allocates minimum memory regardless file size.
+- Supports multiline cells and headers (csv should follow the basic rules https://en.wikipedia.org/wiki/Comma-separated_values).
 - Configurable destination folder.
 - Disabling/enabling of copying a header in chunk files.
 
@@ -35,6 +36,7 @@ import splitCsv "github.com/tolik505/split-csv"
 ```go
 func ExampleSplitCsv() {
 	splitter := splitCsv.New()
+	splitter.Separator = ";"     // "," is by default
 	splitter.FileChunkSize = 100000000 //in bytes (100MB)
 	result, _ := splitter.Split("testdata/test.csv", "testdata/")
 	fmt.Println(result)
@@ -45,6 +47,7 @@ If copying of a header in chunks is not needed then:
 ```go
 func ExampleSplitCsv() {
 	splitter := splitCsv.New()
+	splitter.Separator = ";"     // "," is by default
 	splitter.FileChunkSize = 20000000 //in bytes (20MB)
 	s.WithHeader = false //copying of header in chunks is disabled
 	result, _ := splitter.Split("testdata/test.csv", "testdata/")

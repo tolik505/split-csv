@@ -14,11 +14,11 @@ type state struct {
 	chunkFile     io.WriteCloser
 	chunkFilePath string
 	header        []byte
-	firstLine     bool
+	isFirstLine   bool
 	brokenLine    []byte
 	chunk         int
-	bulkBuffer    buffer
-	fileBuffer    buffer
+	bulkBuffer    buffer // to buffer a bulk to be stored as a chunk file
+	fileBuffer    buffer // to buffer a chunk of the input file
 	columnsCount  int
 	result        []string
 }
