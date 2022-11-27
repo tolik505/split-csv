@@ -26,6 +26,11 @@ func (f stateFactory) Init(
 	resultDirPath string,
 	inputFile io.ReadCloser,
 ) *state {
+	var header []byte
+	if s.WithHeader {
+		header = make([]byte, 0)
+	}
+
 	return &state{
 		s:             s,
 		inputFilePath: inputFilePath,
@@ -33,8 +38,9 @@ func (f stateFactory) Init(
 		ext:           ext,
 		resultDirPath: resultDirPath,
 		inputFile:     inputFile,
-		firstLine:     true,
+		isFirstLine:   true,
 		chunk:         1,
 		bulkBuffer:    bytes.NewBuffer(make([]byte, 0, s.bufferSize)),
+		header:        header,
 	}
 }

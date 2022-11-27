@@ -1,4 +1,8 @@
-Test header 1; Test header 2; Test header 3; Test header 4; Test header 5
+Test header 1; Test header 2; "Multiline
+header; with 3
+lines"; Test header 4; Test header 5
+29; test value; test value; test value; test value
+30; test value; test value; test value; test value
 31; test value; test value; test value; test value
 32; test value; test value; test value; test value
 33; test value; test value; test value; test value
