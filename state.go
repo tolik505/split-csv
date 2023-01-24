@@ -29,3 +29,7 @@ func (s *state) setChunkFile(file io.WriteCloser) {
 	}
 	s.chunkFile = file
 }
+
+func (s *state) isBulkBufferBiggerOrEqualsFileChunkSize() bool {
+	return s.bulkBuffer.Len() >= (s.s.FileChunkSize - len(s.header))
+}

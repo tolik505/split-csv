@@ -106,6 +106,7 @@ func Test_Split_integration(t *testing.T) {
 		s := New()
 		s.Separator = ";"
 		s.FileChunkSize = 800
+		s.bufferSize = 1000
 		result, err := s.Split(input, "testdata/result_default")
 		assertResult(t, result, filesDefaultFlow)
 		assert.Nil(t, err)
@@ -242,7 +243,7 @@ func Test_Split_integration(t *testing.T) {
 		assert.Nil(t, result)
 		assert.EqualError(t, err, "Couldn't read file bulk testdata/test.csv : error")
 	})
-	t.Run("Write chunk file error", func(t *testing.T) {
+	t.Run("write brokenLine to the bulk buffer error", func(t *testing.T) {
 		fileOpMock := mocks.NewFileOperator(t)
 		stat, _ := os.Stat(input)
 		fileOpMock.EXPECT().Stat(input).Return(stat, nil)
@@ -258,7 +259,7 @@ func Test_Split_integration(t *testing.T) {
 		result, err := s.Split(input, "")
 
 		assert.Nil(t, result)
-		assert.EqualError(t, err, "Couldn't write chunk file /chunkFile : write error")
+		assert.EqualError(t, err, "Couldn't write brokenLine to the bulk buffer: buffer write error")
 	})
 
 	setUp(t)
