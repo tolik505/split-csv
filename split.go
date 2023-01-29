@@ -85,10 +85,13 @@ func (s Splitter) Split(inputFilePath string, outputDirPath string) ([]string, e
 		//Read bulk from file
 		size, err := file.Read(bufBulk)
 		if err == io.EOF {
-			_, err = st.chunkFile.Write(st.brokenLine)
-			if err != nil {
-				msg := fmt.Sprintf("Couldn't write chunk file %s : %v", st.chunkFilePath, err)
+			if _, err := st.bulkBuffer.Write(st.brokenLine); err != nil {
+				msg := fmt.Sprintf("Couldn't write brokenLine to the bulk buffer: %v", err)
 				return nil, errors.New(msg)
+			}
+			err = s.saveBulkToFile(st)
+			if err != nil {
+				return nil, err
 			}
 			break
 		}
@@ -107,7 +110,11 @@ func (s Splitter) Split(inputFilePath string, outputDirPath string) ([]string, e
 		if err != nil {
 			return nil, err
 		}
-		if st.bulkBuffer.Len() == 0 || isBrokenMultiLine(lastLine, st) {
+		// If there is nothing to write to the file or the last line is broken multiline row or file chunk size is less
+		// than a buffer size and bulk buffer is smaller than file chunk size then skip saving bulk to file and read
+		// the next file bulk.
+		if st.bulkBuffer.Len() == 0 || isBrokenMultiLine(lastLine, st) ||
+			(st.s.FileChunkSize < st.s.bufferSize && !st.isBulkBufferBiggerOrEqualsFileChunkSize()) {
 			continue
 		}
 
@@ -150,10 +157,7 @@ func (s Splitter) readLinesFromBulk(st *state) ([]byte, error) {
 			msg := fmt.Sprintf("Couldn't write to the bulk buffer: %v", err)
 			return nil, errors.New(msg)
 		}
-		if st.bulkBuffer.Len() >= (st.s.FileChunkSize - len(st.header)) {
-			if isBrokenMultiLine(bytesLine, st) {
-				continue
-			}
+		if st.isBulkBufferBiggerOrEqualsFileChunkSize() && !isBrokenMultiLine(bytesLine, st) {
 			if err = s.saveBulkToFile(st); err != nil {
 				return nil, err
 			}
@@ -262,7 +266,7 @@ func (s Splitter) saveBulkToFile(st *state) error {
 	if s.fileOp.IsNotExist(err) {
 		chunkFile, err := s.fileOp.Create(st.chunkFilePath)
 		if err != nil {
-			msg := fmt.Sprintf("Couldn't create file %s : %v", st.chunkFilePath, err)
+			msg := fmt.Sprintf("Couldn't create file %s: %v", st.chunkFilePath, err)
 			return errors.New(msg)
 		}
 		st.setChunkFile(chunkFile)

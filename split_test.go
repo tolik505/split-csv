@@ -48,7 +48,9 @@ var filesForExampleTest = []string{
 	"testdata/test_3.csv",
 }
 
-type stateFactoryMock struct{}
+type stateFactoryMock struct {
+	BulkBufferMock *mocks.Buffer
+}
 
 func (f *stateFactoryMock) Init(
 	s Splitter,
@@ -60,8 +62,6 @@ func (f *stateFactoryMock) Init(
 ) *state {
 	chunkFileMock := &mocks.WriteCloser{}
 	chunkFileMock.EXPECT().Write([]byte("brokenLine")).Return(0, errors.New("write error"))
-	bulkBufferMock := &mocks.Buffer{}
-	bulkBufferMock.EXPECT().Write([]byte("brokenLine")).Return(0, errors.New("buffer write error"))
 
 	return &state{
 		s:             s,
@@ -72,7 +72,7 @@ func (f *stateFactoryMock) Init(
 		inputFile:     inputFile,
 		isFirstLine:   true,
 		chunk:         1,
-		bulkBuffer:    bulkBufferMock,
+		bulkBuffer:    f.BulkBufferMock,
 		brokenLine:    []byte("brokenLine"),
 		chunkFile:     chunkFileMock,
 		chunkFilePath: "/chunkFile",
@@ -106,6 +106,7 @@ func Test_Split_integration(t *testing.T) {
 		s := New()
 		s.Separator = ";"
 		s.FileChunkSize = 800
+		s.bufferSize = 1000
 		result, err := s.Split(input, "testdata/result_default")
 		assertResult(t, result, filesDefaultFlow)
 		assert.Nil(t, err)
@@ -188,7 +189,7 @@ func Test_Split_integration(t *testing.T) {
 		result, err := s.Split(input, "wrong")
 
 		assert.Nil(t, result)
-		assert.EqualError(t, err, "Couldn't create file wrong/test_1.csv : open wrong/test_1.csv: no such file or directory")
+		assert.EqualError(t, err, "Couldn't create file wrong/test_1.csv: open wrong/test_1.csv: no such file or directory")
 	})
 	t.Run("readLinesFromBulk error", func(t *testing.T) {
 		s := New()
@@ -197,7 +198,7 @@ func Test_Split_integration(t *testing.T) {
 		result, err := s.Split(input, "wrong")
 
 		assert.Nil(t, result)
-		assert.EqualError(t, err, "Couldn't create file wrong/test_1.csv : open wrong/test_1.csv: no such file or directory")
+		assert.EqualError(t, err, "Couldn't create file wrong/test_1.csv: open wrong/test_1.csv: no such file or directory")
 	})
 	t.Run("File Stat error", func(t *testing.T) {
 		fileOpMock := mocks.NewFileOperator(t)
@@ -242,7 +243,7 @@ func Test_Split_integration(t *testing.T) {
 		assert.Nil(t, result)
 		assert.EqualError(t, err, "Couldn't read file bulk testdata/test.csv : error")
 	})
-	t.Run("Write chunk file error", func(t *testing.T) {
+	t.Run("write brokenLine to the bulk buffer error", func(t *testing.T) {
 		fileOpMock := mocks.NewFileOperator(t)
 		stat, _ := os.Stat(input)
 		fileOpMock.EXPECT().Stat(input).Return(stat, nil)
@@ -254,11 +255,40 @@ func Test_Split_integration(t *testing.T) {
 		s.Separator = ";"
 		s.FileChunkSize = 100
 		s.fileOp = fileOpMock
-		s.stateFactory = &stateFactoryMock{}
+		bulkBufferMock := &mocks.Buffer{}
+		bulkBufferMock.EXPECT().Write([]byte("brokenLine")).Return(0, errors.New("buffer write error"))
+		s.stateFactory = &stateFactoryMock{
+			BulkBufferMock: bulkBufferMock,
+		}
 		result, err := s.Split(input, "")
 
 		assert.Nil(t, result)
-		assert.EqualError(t, err, "Couldn't write chunk file /chunkFile : write error")
+		assert.EqualError(t, err, "Couldn't write brokenLine to the bulk buffer: buffer write error")
+	})
+	t.Run("saveBulkToFile error after writing a broken line", func(t *testing.T) {
+		fileOpMock := mocks.NewFileOperator(t)
+		stat, _ := os.Stat(input)
+		fileOpMock.EXPECT().Stat(input).Return(stat, nil)
+		fileMock := mocks.NewReadCloser(t)
+		fileOpMock.EXPECT().Open(input).Return(fileMock, nil)
+		fileMock.EXPECT().Read(mock.Anything).Return(0, io.EOF)
+		fileMock.EXPECT().Close().Return(nil)
+		s := New()
+		s.Separator = ";"
+		s.FileChunkSize = 100
+		s.fileOp = fileOpMock
+		bulkBufferMock := &mocks.Buffer{}
+		bulkBufferMock.EXPECT().Write([]byte("brokenLine")).Return(0, nil)
+		fileOpMock.EXPECT().Stat("test_1.csv").Return(nil, errors.New("not exist"))
+		fileOpMock.EXPECT().IsNotExist(errors.New("not exist")).Return(true)
+		fileOpMock.EXPECT().Create("test_1.csv").Return(nil, errors.New("test error"))
+		s.stateFactory = &stateFactoryMock{
+			BulkBufferMock: bulkBufferMock,
+		}
+		result, err := s.Split(input, "")
+
+		assert.Nil(t, result)
+		assert.EqualError(t, err, "Couldn't create file test_1.csv: test error")
 	})
 
 	setUp(t)
@@ -393,7 +423,7 @@ func TestSplitter_saveBulkToFile(t *testing.T) {
 				},
 			},
 			wantErr: func(t assert.TestingT, err error, _ ...interface{}) bool {
-				return assert.EqualError(t, err, "Couldn't create file _0. : error")
+				return assert.EqualError(t, err, "Couldn't create file _0.: error")
 			},
 		},
 		{
@@ -526,7 +556,7 @@ func TestSplitter_readLinesFromBulk(t *testing.T) {
 				},
 			},
 			wantErr: func(t assert.TestingT, err error, _ ...interface{}) bool {
-				return assert.EqualError(t, err, "Couldn't create file _0. : error")
+				return assert.EqualError(t, err, "Couldn't create file _0.: error")
 			},
 		},
 	}
