@@ -266,7 +266,7 @@ func (s Splitter) saveBulkToFile(st *state) error {
 	if s.fileOp.IsNotExist(err) {
 		chunkFile, err := s.fileOp.Create(st.chunkFilePath)
 		if err != nil {
-			msg := fmt.Sprintf("Couldn't create file %s : %v", st.chunkFilePath, err)
+			msg := fmt.Sprintf("Couldn't create file %s: %v", st.chunkFilePath, err)
 			return errors.New(msg)
 		}
 		st.setChunkFile(chunkFile)
