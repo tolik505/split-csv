@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
@@ -25,10 +24,10 @@ var (
 // FileChunkSize - a size of chunk in bytes, should be set by client
 // WithHeader - whether split csv with header (true by default)
 type Splitter struct {
-	FileChunkSize int //in bytes
+	FileChunkSize int // in bytes
 	WithHeader    bool
 	Separator     string
-	bufferSize    int //in bytes
+	bufferSize    int // in bytes
 	fileOp        fileOperator
 	stateFactory  stateInitializer
 }
@@ -69,25 +68,37 @@ func (s Splitter) Split(inputFilePath string, outputDirPath string) ([]string, e
 		return nil, errors.New(msg)
 	}
 	defer file.Close()
+	fileName := getFileName(inputFilePath)
 
+	return s.SplitReader(file, outputDirPath, fileName)
+}
+
+func (s Splitter) SplitReader(
+	source io.Reader,
+	outputDirPath string,
+	outputFilePrefix string,
+) ([]string, error) {
 	bufBulk := make([]byte, s.bufferSize)
-	fileName, ext := getFileName(inputFilePath)
 	st := s.stateFactory.Init(
 		s,
-		inputFilePath,
-		fileName,
-		ext,
+		outputFilePrefix,
 		prepareResultDirPath(outputDirPath),
-		file,
 	)
 	isFirstBulk := true
 	for {
-		//Read bulk from file
-		size, err := file.Read(bufBulk)
+		// Read bulk from file
+		size, err := source.Read(bufBulk)
 		if err == io.EOF {
 			if _, err := st.bulkBuffer.Write(st.brokenLine); err != nil {
 				msg := fmt.Sprintf("Couldn't write brokenLine to the bulk buffer: %v", err)
 				return nil, errors.New(msg)
+			}
+			if size > 0 {
+				if _, err := st.bulkBuffer.Write(bufBulk[:size]); err != nil {
+					return nil, errors.New(
+						fmt.Sprintf("Couldn't write the last bulk to bulk buffer: %v", err),
+					)
+				}
 			}
 			err = s.saveBulkToFile(st)
 			if err != nil {
@@ -96,7 +107,7 @@ func (s Splitter) Split(inputFilePath string, outputDirPath string) ([]string, e
 			break
 		}
 		if err != nil {
-			msg := fmt.Sprintf("Couldn't read file bulk %s : %v", inputFilePath, err)
+			msg := fmt.Sprintf("Couldn't read file bulk: %v", err)
 			return nil, errors.New(msg)
 		}
 		st.fileBuffer = bytes.NewBuffer(bufBulk[:size])
@@ -142,7 +153,10 @@ func (s Splitter) readLinesFromBulk(st *state) ([]byte, error) {
 			break
 		}
 		if err != nil {
-			msg := fmt.Sprintf("Couldn't read bytes from buffer of file %s : %v", st.inputFilePath, err)
+			msg := fmt.Sprintf(
+				"Couldn't read bytes from buffer: %v",
+				err,
+			)
 			return nil, errors.New(msg)
 		}
 		lastLine = bytesLine
@@ -170,7 +184,8 @@ func (s Splitter) readLinesFromBulk(st *state) ([]byte, error) {
 func isBrokenMultiLine(bytesLine []byte, st *state) bool {
 	separator := []byte(st.s.Separator)[0]
 
-	return countCompletedColumns(bytesLine, separator) != st.columnsCount && !isCompletingLine(bytesLine, separator)
+	return countCompletedColumns(bytesLine, separator) != st.columnsCount &&
+		!isCompletingLine(bytesLine, separator)
 }
 
 func isCompletingLine(line []byte, separator byte) bool {
@@ -261,7 +276,7 @@ loop:
 
 // saveBulkToFile saves lines from bulk to a new file
 func (s Splitter) saveBulkToFile(st *state) error {
-	st.chunkFilePath = st.resultDirPath + st.fileName + "_" + strconv.Itoa(st.chunk) + "." + st.ext
+	st.chunkFilePath = fmt.Sprintf("%s%s_%d.csv", st.resultDirPath, st.fileName, st.chunk)
 	stat, err := s.fileOp.Stat(st.chunkFilePath)
 	if s.fileOp.IsNotExist(err) {
 		chunkFile, err := s.fileOp.Create(st.chunkFilePath)
@@ -277,7 +292,8 @@ func (s Splitter) saveBulkToFile(st *state) error {
 		}
 		st.result = append(st.result, st.chunkFilePath)
 	}
-	_, err = st.chunkFile.Write(st.bulkBuffer.Bytes())
+	bytes := st.bulkBuffer.Bytes()
+	_, err = st.chunkFile.Write(bytes)
 	if err != nil {
 		msg := fmt.Sprintf("Couldn't write chunk file %s : %v", st.chunkFilePath, err)
 		return errors.New(msg)
@@ -291,14 +307,11 @@ func (s Splitter) saveBulkToFile(st *state) error {
 	return nil
 }
 
-// getFileName extracts name and extension from path
-func getFileName(path string) (string, string) {
+// getFileName extracts name from path
+func getFileName(path string) string {
 	filenameArr := strings.Split(filepath.Base(path), ".")
-	if len(filenameArr) == 2 {
-		return filenameArr[0], filenameArr[1]
-	}
 
-	return filenameArr[0], ""
+	return filenameArr[0]
 }
 
 // prepareResultDirPath adds '/' to the end of path if needed

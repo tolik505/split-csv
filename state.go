@@ -6,11 +6,8 @@ import (
 
 type state struct {
 	s             Splitter
-	inputFilePath string
 	fileName      string
-	ext           string
 	resultDirPath string
-	inputFile     io.ReadCloser
 	chunkFile     io.WriteCloser
 	chunkFilePath string
 	header        []byte
