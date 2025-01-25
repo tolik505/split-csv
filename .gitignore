@@ -1,5 +1,6 @@
 .idea
 .DS_Store
+coverage.out
 testdata/.DS_Store
 testdata/big.csv
 testdata/result_custom_reader/test_1.csv

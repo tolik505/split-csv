@@ -340,6 +340,29 @@ func Test_Split_integration(t *testing.T) {
 		assert.Nil(t, result)
 		assert.EqualError(t, err, "Couldn't create file test_1.csv: test error")
 	})
+	t.Run("Error while writing the last bulk to bulk buffer", func(t *testing.T) {
+		fileOpMock := mocks.NewFileOperator(t)
+		stat, _ := os.Stat(input)
+		fileOpMock.EXPECT().Stat(input).Return(stat, nil)
+		fileMock := mocks.NewReadCloser(t)
+		fileOpMock.EXPECT().Open(input).Return(fileMock, nil)
+		fileMock.EXPECT().Read(mock.Anything).Return(3, io.EOF)
+		fileMock.EXPECT().Close().Return(nil)
+		s := New()
+		s.Separator = ";"
+		s.FileChunkSize = 100
+		s.fileOp = fileOpMock
+		bulkBufferMock := &mocks.Buffer{}
+		bulkBufferMock.EXPECT().Write([]byte("brokenLine")).Return(0, nil)
+		bulkBufferMock.EXPECT().Write(mock.Anything).Return(0, errors.New("test error"))
+		s.stateFactory = &stateFactoryMock{
+			BulkBufferMock: bulkBufferMock,
+		}
+		result, err := s.Split(input, "")
+
+		assert.Nil(t, result)
+		assert.EqualError(t, err, "Couldn't write the last bulk to bulk buffer: test error")
+	})
 
 	setUp(t)
 }
